@@ -255,8 +255,8 @@ DB_PORT=$DB_PORT
 PORT=3010
 NODE_ENV=production
 
-# CORS Configuration (update with your domain)
-CORS_ORIGIN=*
+# CORS Configuration (update with your frontend origin if served separately)
+FRONTEND_URL=http://localhost
 EOF
     
     chmod 600 .env

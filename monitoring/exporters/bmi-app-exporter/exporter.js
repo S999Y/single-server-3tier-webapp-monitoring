@@ -19,9 +19,36 @@ promClient.collectDefaultMetrics({
   prefix: 'bmi_app_'
 });
 
+// Resolve the database name for pg_database_size()
+function resolveDatabaseName() {
+  if (process.env.DB_NAME) return process.env.DB_NAME;
+  if (process.env.DATABASE_URL) {
+    try {
+      const name = new URL(process.env.DATABASE_URL).pathname.replace(/^\//, '');
+      if (name) return decodeURIComponent(name);
+    } catch (err) {
+      console.warn('Could not parse database name from DATABASE_URL:', err.message);
+    }
+  }
+  return 'bmidb';
+}
+
+const databaseName = resolveDatabaseName();
+
 // Database connection pool
+// DATABASE_URL takes precedence; otherwise fall back to individual DB_* vars
+const connection = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: Number(process.env.DB_PORT) || 5432,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: databaseName,
+    };
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  ...connection,
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
@@ -223,7 +250,8 @@ async function collectMetrics() {
 
     // Database size
     const sizeResult = await pool.query(
-      "SELECT pg_database_size('bmidb') as size"
+      'SELECT pg_database_size($1) as size',
+      [databaseName]
     );
     databaseSize.set(parseInt(sizeResult.rows[0].size));
 

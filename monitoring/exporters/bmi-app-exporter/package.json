@@ -4,8 +4,8 @@
   "description": "Custom Prometheus exporter for BMI Health Tracker application metrics",
   "main": "exporter.js",
   "scripts": {
-    "start": "node api.js && node exporter.js",
-    "dev": "node api.js && nodemon exporter.js"
+    "start": "node init && node exporter.js",
+    "dev": "node init && nodemon exporter.js"
   },
   "dependencies": {
     "express": "^4.18.2",

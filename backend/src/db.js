@@ -1,8 +1,19 @@
 ﻿const { Pool } = require('pg');
 
 // PostgreSQL connection pool configuration
+// DATABASE_URL takes precedence; otherwise fall back to individual DB_* vars
+const connection = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: Number(process.env.DB_PORT) || 5432,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME || 'bmidb',
+    };
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  ...connection,
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
   connectionTimeoutMillis: 2000, // Return error after 2 seconds if can't connect

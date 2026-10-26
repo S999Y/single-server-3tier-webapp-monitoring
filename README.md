@@ -84,7 +84,7 @@ A production-ready BMI/health metrics web application deployed across two AWS EC
 /
 ├── IMPLEMENTATION_AUTO.sh          # Automated app-server deployment (run as root/sudo)
 ├── IMPLEMENTATION_GUIDE.md         # Manual step-by-step equivalent of the above
-├── create-ec2.sh                   # Provisions both EC2 instances via AWS CLI
+├── Create-EC2-Instances.ps1        # Provisions both EC2 instances via AWS CLI (PowerShell)
 ├── .gitattributes                  # Enforces LF line endings for .sh/.yml files
 │
 ├── backend/
@@ -92,8 +92,7 @@ A production-ready BMI/health metrics web application deployed across two AWS EC
 │   │   ├── server.js               # Express entry point — PORT 3010
 │   │   ├── routes.js               # All API route handlers
 │   │   ├── calculations.js         # BMI, BMR, calorie formulas (pure functions)
-│   │   ├── db.js                   # pg connection pool (DATABASE_URL)
-│   │   └── metrics.js              # prom-client counters (request/error metrics)
+│   │   └── db.js                   # pg connection pool (DATABASE_URL)
 │   ├── migrations/
 │   │   ├── 001_create_measurements.sql   # Creates measurements table
 │   │   └── 002_add_measurement_date.sql  # Adds measurement_date column (idempotent)
@@ -205,7 +204,7 @@ npm run dev       # nodemon — auto-reloads on file changes
 ```
 
 Verify: `curl http://localhost:3010/health`
-Expected: `{"status":"ok","database":"connected","timestamp":"..."}`
+Expected: `{"status":"ok","environment":"development"}`
 
 ### 5. Start the frontend
 
@@ -235,14 +234,17 @@ The deployment splits across two EC2 instances. Start with the monitoring server
 
 > **This creates real AWS resources that incur charges. Review the script first.**
 
-```bash
-chmod +x create-ec2.sh
-./create-ec2.sh
+```powershell
+# Windows PowerShell (review and override the defaults inside the script first)
+.\Create-EC2-Instances.ps1 -AwsProfile <aws-profile> -Region <region> -InstanceCount 2 -WaitForRunning
 ```
 
-The script creates:
-- `bmi-app-server` — Ubuntu 22.04 LTS, t2.micro, ports 22/80/443/3010/9091/9100/9113/9187/9080 open
-- `bmi-monitoring-server` — Ubuntu 22.04 LTS, t2.micro, ports 22/3001/9090/9093/3100/9100 open
+The script launches two instances — an application server and a monitoring
+server — using the default VPC/subnet/security group/AMI defined in its `param`
+block. Override those parameters (or edit the defaults) for your account, and
+make sure the security group allows the required ports
+(22/80/443/3010/9091/9100/9113/9187/9080 on the app server and
+22/3001/9090/9093/3100/9100 on the monitoring server).
 
 After completion, note both public IP addresses from the script output.
 
@@ -364,12 +366,15 @@ For a manual walkthrough, see [monitoring/3-tier-app/scripts/setup-application-s
 
 | Variable | Example | Required | Description |
 |---|---|---|---|
-| `DATABASE_URL` | `postgresql://bmi_user:pass@localhost:5432/bmidb` | Yes | pg connection string |
+| `DATABASE_URL` | `postgresql://bmi_user:pass@localhost:5432/bmidb` | Yes* | pg connection string |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `bmidb` / `bmi_user` / `pass` | No | Fallback when `DATABASE_URL` is unset |
 | `PORT` | `3010` | No | Defaults to `3010` |
 | `NODE_ENV` | `production` | No | Enables prod CORS rules |
 | `FRONTEND_URL` | `http://52.x.x.x` | No | Allowed CORS origin in prod |
 
-The BMI App Exporter reads `DATABASE_URL` from `backend/.env` if the variable is not already set in the process environment.
+\* Either `DATABASE_URL` or the individual `DB_*` variables are required.
+
+The BMI App Exporter reads `backend/.env` if `DATABASE_URL` is not already set in the process environment, and uses the same connection fallback as the backend.
 
 ---
 
@@ -392,18 +397,17 @@ sudo -u postgres psql -d bmidb -f /opt/single-server-3tier-webapp-monitoring/bac
 | Column | Type | Notes |
 |---|---|---|
 | `id` | SERIAL PRIMARY KEY | |
-| `name` | VARCHAR(100) | NOT NULL |
-| `age` | INTEGER | CHECK > 0 |
-| `gender` | VARCHAR(10) | `male` or `female` |
-| `height_cm` | DECIMAL(5,2) | CHECK > 0 |
-| `weight_kg` | DECIMAL(5,2) | CHECK > 0 |
-| `bmi` | DECIMAL(5,2) | Calculated: `weight / (height_m)²` |
-| `bmi_category` | VARCHAR(50) | Underweight / Normal weight / Overweight / Obese |
-| `bmr` | DECIMAL(8,2) | Mifflin-St Jeor equation |
-| `daily_calories` | DECIMAL(8,2) | BMR × activity multiplier |
-| `activity_level` | VARCHAR(20) | sedentary / light / moderate / active / very_active |
-| `measurement_date` | DATE | Added by migration 002 |
-| `created_at` | TIMESTAMPTZ | DEFAULT NOW() |
+| `weight_kg` | NUMERIC(5,2) | CHECK > 0 and < 1000 |
+| `height_cm` | NUMERIC(5,2) | CHECK > 0 and < 300 |
+| `age` | INTEGER | CHECK > 0 and < 150 |
+| `sex` | VARCHAR(10) | `male` or `female` |
+| `activity_level` | VARCHAR(30) | sedentary / light / moderate / active / very_active |
+| `bmi` | NUMERIC(4,1) | Calculated: `weight / (height_m)²` |
+| `bmi_category` | VARCHAR(30) | Underweight / Normal / Overweight / Obese |
+| `bmr` | INTEGER | Mifflin-St Jeor equation |
+| `daily_calories` | INTEGER | BMR × activity multiplier |
+| `measurement_date` | DATE | NOT NULL, DEFAULT CURRENT_DATE |
+| `created_at` | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
 
 ---
 
@@ -422,14 +426,17 @@ Create a new measurement. The server calculates BMI, BMR, and daily calories.
 
 ```json
 {
-  "name": "Alice",
+  "weightKg": 65,
+  "heightCm": 165,
   "age": 30,
-  "gender": "female",
-  "height_cm": 165,
-  "weight_kg": 65,
-  "activity_level": "moderate"
+  "sex": "female",
+  "activity": "moderate",
+  "measurementDate": "2024-01-15"
 }
 ```
+
+`weightKg`, `heightCm`, `age`, and `sex` are required. `activity` defaults to
+`sedentary`; `measurementDate` defaults to today (UTC).
 
 **Activity level values:** `sedentary` · `light` · `moderate` · `active` · `very_active`
 
@@ -437,21 +444,24 @@ Create a new measurement. The server calculates BMI, BMR, and daily calories.
 
 ```json
 {
-  "id": 42,
-  "name": "Alice",
-  "age": 30,
-  "gender": "female",
-  "height_cm": 165,
-  "weight_kg": 65,
-  "bmi": 23.88,
-  "bmi_category": "Normal weight",
-  "bmr": 1467.5,
-  "daily_calories": 2274.63,
-  "activity_level": "moderate",
-  "measurement_date": "2024-01-15",
-  "created_at": "2024-01-15T10:30:00.000Z"
+  "measurement": {
+    "id": 42,
+    "weight_kg": "65.00",
+    "height_cm": "165.00",
+    "age": 30,
+    "sex": "female",
+    "activity_level": "moderate",
+    "bmi": "23.9",
+    "bmi_category": "Normal",
+    "bmr": 1467,
+    "daily_calories": 2274,
+    "measurement_date": "2024-01-15T00:00:00.000Z",
+    "created_at": "2024-01-15T10:30:00.000Z"
+  }
 }
 ```
+
+`NUMERIC` columns are returned as strings by `node-postgres`.
 
 ---
 
@@ -459,7 +469,11 @@ Create a new measurement. The server calculates BMI, BMR, and daily calories.
 
 Returns all measurements, most recent first.
 
-**Response `200`:** Array of measurement objects (same shape as POST response).
+**Response `200`:**
+
+```json
+{ "rows": [ { "id": 42, "bmi": "23.9", "...": "..." } ] }
+```
 
 ---
 
@@ -470,23 +484,27 @@ Returns daily BMI averages for the past 30 days.
 **Response `200`:**
 
 ```json
-[
-  { "date": "2024-01-15", "avg_bmi": 23.9, "count": 3 },
-  { "date": "2024-01-14", "avg_bmi": 24.1, "count": 1 }
-]
+{
+  "rows": [
+    { "day": "2024-01-15T00:00:00.000Z", "avg_bmi": "23.9" },
+    { "day": "2024-01-14T00:00:00.000Z", "avg_bmi": "24.1" }
+  ]
+}
 ```
 
 ---
 
 ### `GET /health`
 
-Liveness and readiness probe. Queries the database.
+Liveness probe for the Express process (does not query the database).
 
 **Response `200`:**
 
 ```json
-{ "status": "ok", "database": "connected", "timestamp": "2024-01-15T10:30:00.000Z" }
+{ "status": "ok", "environment": "production" }
 ```
+
+> Database connectivity is exposed by the exporter at `http://localhost:9091/health`.
 
 ---
 

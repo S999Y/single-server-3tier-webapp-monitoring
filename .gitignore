@@ -1,2 +1,13 @@
 config.bat
 node_modules
+
+# Environment files (never commit real credentials)
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log

@@ -126,24 +126,7 @@ start_postgresql_service() {
 # Database User and Database Creation
 ################################################################################
 
-create_database_user() {
-    print_header "Creating Database User"
-    
-    # Check if user already exists
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
-        print_warning "User '$DB_USER' already exists"
-        read -p "Do you want to drop and recreate? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            sudo -u postgres psql -c "DROP USER IF EXISTS $DB_USER CASCADE;"
-            print_info "Dropped existing user '$DB_USER'"
-        else
-            print_info "Keeping existing user"
-            return 0
-        fi
-    fi
-    
-    # Get password
+prompt_database_password() {
     while true; do
         read -sp "Enter password for database user '$DB_USER': " DB_PASS
         echo
@@ -159,6 +142,28 @@ create_database_user() {
     
     # Store password for later use
     export DB_PASSWORD="$DB_PASS"
+}
+
+create_database_user() {
+    print_header "Creating Database User"
+    
+    # Check if user already exists
+    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+        print_warning "User '$DB_USER' already exists"
+        read -p "Do you want to drop and recreate? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            sudo -u postgres psql -c "DROP USER IF EXISTS $DB_USER CASCADE;"
+            print_info "Dropped existing user '$DB_USER'"
+        else
+            print_info "Keeping existing user"
+            # Password is still required by later steps (migrations, .env)
+            prompt_database_password
+            return 0
+        fi
+    fi
+    
+    prompt_database_password
     
     # Create user
     sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS';"
@@ -320,17 +325,17 @@ seed_sample_data() {
     
     psql -U "$DB_USER" -d "$DB_NAME" -h localhost << 'EOF'
 -- Sample measurements for testing
-INSERT INTO measurements (weight_kg, height_cm, age, gender, created_at) VALUES
-(70.5, 175, 25, 'male', NOW() - INTERVAL '10 days'),
-(65.2, 162, 30, 'female', NOW() - INTERVAL '9 days'),
-(85.0, 180, 35, 'male', NOW() - INTERVAL '8 days'),
-(58.5, 155, 22, 'female', NOW() - INTERVAL '7 days'),
-(92.3, 185, 40, 'male', NOW() - INTERVAL '6 days'),
-(72.0, 168, 28, 'female', NOW() - INTERVAL '5 days'),
-(68.5, 172, 26, 'male', NOW() - INTERVAL '4 days'),
-(61.0, 160, 24, 'female', NOW() - INTERVAL '3 days'),
-(78.5, 178, 32, 'male', NOW() - INTERVAL '2 days'),
-(55.0, 158, 21, 'female', NOW() - INTERVAL '1 day');
+INSERT INTO measurements (weight_kg, height_cm, age, sex, activity_level, bmi, bmi_category, bmr, daily_calories, measurement_date, created_at) VALUES
+(70.5, 175, 25, 'male', 'moderate', 23.0, 'Normal', 1679, 2602, CURRENT_DATE - 10, NOW() - INTERVAL '10 days'),
+(65.2, 162, 30, 'female', 'light', 24.8, 'Normal', 1354, 1861, CURRENT_DATE - 9, NOW() - INTERVAL '9 days'),
+(85.0, 180, 35, 'male', 'active', 26.2, 'Overweight', 1805, 3114, CURRENT_DATE - 8, NOW() - INTERVAL '8 days'),
+(58.5, 155, 22, 'female', 'sedentary', 24.3, 'Normal', 1283, 1539, CURRENT_DATE - 7, NOW() - INTERVAL '7 days'),
+(92.3, 185, 40, 'male', 'moderate', 27.0, 'Overweight', 1884, 2921, CURRENT_DATE - 6, NOW() - INTERVAL '6 days'),
+(72.0, 168, 28, 'female', 'active', 25.5, 'Overweight', 1469, 2534, CURRENT_DATE - 5, NOW() - INTERVAL '5 days'),
+(68.5, 172, 26, 'male', 'light', 23.2, 'Normal', 1635, 2248, CURRENT_DATE - 4, NOW() - INTERVAL '4 days'),
+(61.0, 160, 24, 'female', 'moderate', 23.8, 'Normal', 1329, 2060, CURRENT_DATE - 3, NOW() - INTERVAL '3 days'),
+(78.5, 178, 32, 'male', 'very_active', 24.8, 'Normal', 1743, 3311, CURRENT_DATE - 2, NOW() - INTERVAL '2 days'),
+(55.0, 158, 21, 'female', 'light', 22.0, 'Normal', 1272, 1748, CURRENT_DATE - 1, NOW() - INTERVAL '1 day');
 
 SELECT COUNT(*) as total_measurements FROM measurements;
 EOF
@@ -381,49 +386,35 @@ generate_env_file() {
     # Create .env file
     cat > "$ENV_FILE" << EOF
 # Database Configuration
+DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=$DB_NAME
 DB_USER=$DB_USER
 DB_PASSWORD=$DB_PASSWORD
 
-# Database URL (for some ORMs)
-DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@localhost:5432/$DB_NAME
-
 # Server Configuration
-PORT=3000
-NODE_ENV=development
-
-# Session Secret (generate a random string in production)
-SESSION_SECRET=$(openssl rand -hex 32)
-
-# CORS Settings
-CORS_ORIGIN=http://localhost:5173
+PORT=3010
+NODE_ENV=production
+FRONTEND_URL=http://localhost
 EOF
-    
+
     print_success "Created $ENV_FILE"
-    
+
     # Also create .env.example (without sensitive data)
     cat > "$ENV_EXAMPLE" << EOF
 # Database Configuration
+DATABASE_URL=postgresql://bmi_user:your_password@localhost:5432/bmidb
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=bmidb
 DB_USER=bmi_user
 DB_PASSWORD=your_password_here
 
-# Database URL
-DATABASE_URL=postgresql://bmi_user:your_password@localhost:5432/bmidb
-
 # Server Configuration
-PORT=3000
-NODE_ENV=development
-
-# Session Secret
-SESSION_SECRET=your_secret_here
-
-# CORS Settings
-CORS_ORIGIN=http://localhost:5173
+PORT=3010
+NODE_ENV=production
+FRONTEND_URL=http://localhost
 EOF
     
     print_success "Created $ENV_EXAMPLE"

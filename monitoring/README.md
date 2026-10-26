@@ -183,7 +183,7 @@ Promtail applies **pipeline stages** (regex extraction) to Nginx and PostgreSQL 
 
 The custom exporter (`exporters/bmi-app-exporter/exporter.js`) is a Node.js process that:
 
-1. Opens a `pg` connection pool (max 5 connections) to PostgreSQL using `DATABASE_URL` from `backend/.env`.
+1. Opens a `pg` connection pool (max 5 connections) to PostgreSQL using `DATABASE_URL` from `backend/.env` (falling back to the individual `DB_*` variables when `DATABASE_URL` is unset).
 2. Runs SQL queries against the `measurements` table every **15 seconds** to compute business KPIs.
 3. Exposes results at `http://localhost:9091/metrics` in Prometheus text format via `prom-client`.
 
@@ -384,7 +384,8 @@ tail -f monitoring/exporters/bmi-app-exporter/logs/err.log
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `DATABASE_URL` | read from `backend/.env` | Yes | PostgreSQL connection string |
+| `DATABASE_URL` | read from `backend/.env` | Yes* | PostgreSQL connection string |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | — | No | Fallback when `DATABASE_URL` is unset |
 | `EXPORTER_PORT` | `9091` | No | HTTP port to serve metrics on |
 | `NODE_ENV` | — | No | `production` disables dotenv auto-load |
 
